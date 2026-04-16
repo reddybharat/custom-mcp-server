@@ -13,21 +13,40 @@ The Model Context Protocol (MCP) is a standard for connecting AI models to exter
 
 ## Architecture Overview
 
+The client runs a single LangChain agent that discovers tools from **two independent MCP servers** over different transports:
+
+```mermaid
+flowchart TB
+    subgraph cli["Client stack"]
+        direction TB
+        c_title["client.py"]
+        c_detail["LangChain create_agent · MultiServerMCPClient · tool discovery"]
+        c_title --- c_detail
+    end
+
+    subgraph smath["Math MCP server"]
+        direction TB
+        m_file["server/math.py"]
+        m_tools["MCP tools · add · subtract · multiply · divide"]
+        m_io["stdio · spawned local process"]
+        m_file --- m_tools
+        m_tools --- m_io
+    end
+
+    subgraph swx["Weather MCP server"]
+        direction TB
+        w_file["server/weather.py"]
+        w_tools["MCP tools · get_weather"]
+        w_io["streamable HTTP · localhost:8000/mcp"]
+        w_file --- w_tools
+        w_tools --- w_io
+    end
+
+    c_detail <-->|MCP| m_io
+    c_detail <-->|MCP| w_io
 ```
-┌─────────────────┐    ┌─────────────────┐
-│   ReAct Agent   │    │  Calculator     │
-│   (Client)      │◄──►│  Server         │
-│                 │    │  (stdio)        │
-└─────────────────┘    └─────────────────┘
-         │
-         │ HTTP
-         ▼
-┌─────────────────┐
-│   Weather       │
-│   Server        │
-│   (HTTP)        │
-└─────────────────┘
-```
+
+**Flow:** the model decides when to call tools; each call goes over MCP to the right server (math via stdio, weather via HTTP), and results return through the same path until the agent finishes the reply.
 
 ## Project Structure
 
@@ -35,22 +54,21 @@ The Model Context Protocol (MCP) is a standard for connecting AI models to exter
 custom-mcp-server/
 ├── client.py              # ReAct agent client
 ├── server/
-│   ├── calculator.py      # Calculator MCP server (stdio)
+│   ├── math.py            # Math MCP server (stdio)
 │   └── weather.py         # Weather MCP server (HTTP)
-├── requirements.txt       # Dependencies
-└── pyproject.toml        # Project configuration
+└── requirements.txt       # Dependencies
 ```
 
 ## Key Components
 
 ### 1. MCP Servers
 
-**Calculator Server** (`server/calculator.py`):
+**Math MCP server** (`server/math.py`):
 - Uses `stdio` transport for direct communication
 - Provides basic math operations: add, subtract, multiply, divide
 - Demonstrates simple tool definition with FastMCP
 
-**Weather Server** (`server/weather.py`):
+**Weather MCP server** (`server/weather.py`):
 - Uses `streamable-http` transport for web communication
 - Integrates with external weather API
 - Shows async tool implementation
@@ -59,21 +77,42 @@ custom-mcp-server/
 
 **ReAct Agent** (`client.py`):
 - Connects to multiple MCP servers simultaneously
-- Uses LangGraph's ReAct agent for tool orchestration
+- Uses LangChain's `create_agent` for tool orchestration
 - Demonstrates multi-server tool integration
 
 ## Quick Start
 
-1. **Install Dependencies**:
+Requires **Python 3.12+**.
+
+1. **Create a virtual environment and install dependencies**:
    ```bash
-   pip install -r requirements.txt
+   python -m venv .venv
    ```
 
-2. **Set Environment Variables**:
-   ```bash
-   export GROQ_API_KEY="your-groq-api-key"
-   export WEATHER_API_KEY="your-weather-api-key"
-   ```
+   Activate it, then install packages:
+
+   - **macOS / Linux**:
+     ```bash
+     source .venv/bin/activate
+     pip install -r requirements.txt
+     ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     .\.venv\Scripts\Activate.ps1
+     pip install -r requirements.txt
+     ```
+
+2. **Set environment variables**:
+   - **macOS / Linux**:
+     ```bash
+     export GROQ_API_KEY="your-groq-api-key"
+     export WEATHER_API_KEY="your-weather-api-key"
+     ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     $env:GROQ_API_KEY = "your-groq-api-key"
+     $env:WEATHER_API_KEY = "your-weather-api-key"
+     ```
 
 3. **Run the Weather Server** (in one terminal):
    ```bash

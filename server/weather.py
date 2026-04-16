@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+import asyncio
 import requests
 import os
 from dotenv import load_dotenv
@@ -25,4 +26,4 @@ async def get_weather(city: str) -> str:
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
-    # get_weather("Tokyo")
+    # asyncio.run(get_weather("Tokyo"))
