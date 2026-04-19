@@ -1,5 +1,10 @@
 langchain>=1.0.0
-langchain-groq>=1.0.0
 langchain-mcp-adapters>=0.2.0
 python-dotenv>=1.0.0
 requests>=2.31.0
+uvicorn>=0.34.0
+fastapi>=0.115.0
+
+# Local testing
+streamlit>=1.40.0
+langchain-groq>=1.0.0

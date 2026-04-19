@@ -1,13 +1,12 @@
 from mcp.server.fastmcp import FastMCP
-import asyncio
 import requests
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-mcp = FastMCP("Weather")
+weather_mcp = FastMCP("Weather")
 
-@mcp.tool()
+@weather_mcp.tool()
 async def get_weather(city: str) -> str:
     """
     Get the current weather conditions for a given city.
@@ -20,10 +19,10 @@ async def get_weather(city: str) -> str:
 
     current_weather = response.json().get('current')
     current_weather_str = f"The current weather in {city} is {current_weather.get('condition').get('text')} with a temperature of {current_weather.get('temp_c')}°C and a humidity of {current_weather.get('humidity')}%."
-    print(current_weather_str)
+    # print(current_weather_str)
 
     return current_weather_str
 
-if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
-    # asyncio.run(get_weather("Tokyo"))
+# if __name__ == "__main__":
+#     weather_mcp.run(transport="streamable-http")
+#     # asyncio.run(get_weather("Tokyo"))

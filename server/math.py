@@ -1,31 +1,30 @@
 from mcp.server.fastmcp import FastMCP
+from typing import List
 
-mcp = FastMCP("Math")
+math_mcp = FastMCP("Math")
 
-@mcp.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers and return the result
-    """
-    return a + b
+@math_mcp.tool()
+async def add_tool(numbers: List[float]) -> float:
+    """use this tool to perform addition of a list of numbers"""
+    return sum(numbers)
 
-@mcp.tool()
-def subtract(a: int, b: int) -> int:
-    """Subtract two numbers and return the result
-    """
+@math_mcp.tool()
+async def substract_tool(a: float, b: float) -> float:
+    """use this tool to perform substraction between two numbers"""
     return a - b
 
-@mcp.tool()
-def multiply(a: int, b: int) -> int:
-    """Multiply two numbers and return the result
-    """
-    return a * b
+@math_mcp.tool()
+async def multiply_tool(numbers: List[float]) -> float:
+    """use this tool to perform multiplication of a list of numbers"""
+    result = 1
+    for num in numbers:
+        result *= num
+    return result
 
-@mcp.tool()
-def divide(a: int, b: int) -> int:
-    """Divide two numbers and return the result
-    """
+@math_mcp.tool()
+async def divide_tool(a: float, b: float) -> float:
+    """use this tool to perform division between two numbers"""
     return a / b
 
-
-if __name__ == "__main__":
-    mcp.run(transport="stdio")
+# if __name__ == "__main__":
+#     math_mcp.run(transport="stdio")
