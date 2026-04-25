@@ -4,7 +4,15 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 uvicorn>=0.34.0
 fastapi>=0.115.0
+mcp>=1.0.0
+PyJWT>=2.10.0
+bcrypt>=4.0.0,<4.1.0
+python-multipart>=0.0.9
 
 # Local testing
 streamlit>=1.40.0
 langchain-groq>=1.0.0
+
+# --- Uncomment when implementing DATABASE_URL + DatabaseUserRepository ---
+# sqlalchemy[asyncio]>=2.0.0
+# asyncpg>=0.29.0

@@ -1,7 +1,10 @@
+import server.env  # noqa: F401 — load `.env` before other imports
+
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
+from server.api.auth import router as auth_router
 from server.math import math_mcp
 from server.weather import weather_mcp
 import uvicorn
@@ -24,6 +27,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Custom MCP Server", lifespan=lifespan)
 
+app.include_router(auth_router)
 app.mount("/math", math_starlette)
 app.mount("/weather", weather_starlette)
 
