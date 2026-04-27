@@ -13,72 +13,55 @@ The Model Context Protocol (MCP) is a standard for connecting AI models to exter
 
 ## Architecture Overview
 
-The client runs a single LangChain agent that discovers tools from **two independent MCP servers** over different transports:
+The client runs a single LangChain agent that discovers tools from **two MCP mounts** (math and weather) on the same FastAPI app over **streamable HTTP**, with JWT Bearer auth on MCP endpoints.
 
 ```mermaid
 flowchart TB
     subgraph cli["Client stack"]
         direction TB
-        c_title["client.py"]
+        c_title["client/agent.py · app.py"]
         c_detail["LangChain create_agent · MultiServerMCPClient · tool discovery"]
         c_title --- c_detail
     end
 
-    subgraph smath["Math MCP server"]
+    subgraph api["FastAPI main.py"]
         direction TB
-        m_file["server/math.py"]
-        m_tools["MCP tools · add · subtract · multiply · divide"]
-        m_io["stdio · spawned local process"]
-        m_file --- m_tools
-        m_tools --- m_io
+        math_m["/math/mcp"]
+        wx_m["/weather/mcp"]
+        auth["/auth/token"]
     end
 
-    subgraph swx["Weather MCP server"]
-        direction TB
-        w_file["server/weather.py"]
-        w_tools["MCP tools · get_weather"]
-        w_io["streamable HTTP · localhost:8000/mcp"]
-        w_file --- w_tools
-        w_tools --- w_io
-    end
-
-    c_detail <-->|MCP| m_io
-    c_detail <-->|MCP| w_io
+    c_detail <-->|Bearer JWT| math_m
+    c_detail <-->|Bearer JWT| wx_m
+    c_detail -->|password form| auth
 ```
 
-**Flow:** the model decides when to call tools; each call goes over MCP to the right server (math via stdio, weather via HTTP), and results return through the same path until the agent finishes the reply.
+**Flow:** the model decides when to call tools; each call goes over MCP to the mounted server on the API host, and results return through the same path until the agent finishes the reply.
 
 ## Project Structure
 
 ```
 custom-mcp-server/
-├── client.py              # ReAct agent client
-├── server/
-│   ├── math.py            # Math MCP server (stdio)
-│   └── weather.py         # Weather MCP server (HTTP)
-└── requirements.txt       # Dependencies
+├── main.py                 # FastAPI app: auth + MCP mounts (run with uvicorn)
+├── app.py                  # Streamlit chat UI (optional)
+├── client/
+│   ├── agent.py            # LangChain agent + token helpers
+│   └── config.py           # MCP URLs and MultiServerMCPClient config
+├── server/                 # MCP servers, auth, persistence
+└── requirements.txt
 ```
 
 ## Key Components
 
-### 1. MCP Servers
+### 1. MCP Servers (FastAPI)
 
-**Math MCP server** (`server/math.py`):
-- Uses `stdio` transport for direct communication
-- Provides basic math operations: add, subtract, multiply, divide
-- Demonstrates simple tool definition with FastMCP
-
-**Weather MCP server** (`server/weather.py`):
-- Uses `streamable-http` transport for web communication
-- Integrates with external weather API
-- Shows async tool implementation
+**Math and weather** are defined under [`server/`](server/) and mounted from [`main.py`](main.py) at `/math` and `/weather` with streamable HTTP and scoped JWT access.
 
 ### 2. MCP Client
 
-**ReAct Agent** (`client.py`):
-- Connects to multiple MCP servers simultaneously
-- Uses LangChain's `create_agent` for tool orchestration
-- Demonstrates multi-server tool integration
+**Agent** ([`client/agent.py`](client/agent.py)): connects to both mounts via `MultiServerMCPClient`, uses LangChain `create_agent` with Groq.
+
+**Streamlit UI** ([`app.py`](app.py)): log in against `POST /auth/token`, then chat with the agent.
 
 ## Quick Start
 
@@ -102,27 +85,17 @@ Requires **Python 3.12+**.
      pip install -r requirements.txt
      ```
 
-2. **Set environment variables**:
-   - **macOS / Linux**:
-     ```bash
-     export GROQ_API_KEY="your-groq-api-key"
-     export WEATHER_API_KEY="your-weather-api-key"
-     ```
-   - **Windows (PowerShell)**:
-     ```powershell
-     $env:GROQ_API_KEY = "your-groq-api-key"
-     $env:WEATHER_API_KEY = "your-weather-api-key"
-     ```
+2. **Configure environment**: copy `.env.example` to `.env` and set at least `JWT_SECRET`, `GROQ_API_KEY`, and (for weather) `WEATHER_API_KEY`. See `.env.example` for optional MCP client variables (`MCP_SERVER_URL`, `MCP_BEARER_TOKEN`, etc.).
 
-3. **Run the Weather Server** (in one terminal):
+3. **Run the API** (from repo root):
    ```bash
-   python server/weather.py
+   python main.py
    ```
+   or `uvicorn main:app --host 0.0.0.0 --port 8000`.
 
-4. **Run the Client** (in another terminal):
-   ```bash
-   python client.py
-   ```
+4. **Run the client** (choose one):
+   - **CLI**: `python -m client.agent "Your question here"` (or omit the argument to be prompted). Uses `.env` token or `MCP_AUTH_*`, else prompts for username and password.
+   - **Streamlit**: `streamlit run app.py`.
 
 ## MCP Learning Points
 

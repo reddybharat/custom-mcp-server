@@ -1,17 +1,21 @@
-from mcp.server.fastmcp import FastMCP
 from typing import List
 
-math_mcp = FastMCP("Math")
+from server.core.auth import create_authenticated_mcp
+
+math_mcp = create_authenticated_mcp("Math", "math", required_scopes=["mcp:math"])
+
 
 @math_mcp.tool()
 async def add_tool(numbers: List[float]) -> float:
     """use this tool to perform addition of a list of numbers"""
     return sum(numbers)
 
+
 @math_mcp.tool()
 async def substract_tool(a: float, b: float) -> float:
     """use this tool to perform substraction between two numbers"""
     return a - b
+
 
 @math_mcp.tool()
 async def multiply_tool(numbers: List[float]) -> float:
@@ -21,10 +25,8 @@ async def multiply_tool(numbers: List[float]) -> float:
         result *= num
     return result
 
+
 @math_mcp.tool()
 async def divide_tool(a: float, b: float) -> float:
     """use this tool to perform division between two numbers"""
     return a / b
-
-# if __name__ == "__main__":
-#     math_mcp.run(transport="stdio")
