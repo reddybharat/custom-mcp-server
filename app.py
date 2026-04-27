@@ -2,45 +2,25 @@
 
 1. ``POST {MCP_SERVER_URL}/auth/token`` with ``username`` and ``password`` (form).
 2. MCP URLs ``{MCP_SERVER_URL}/math/mcp`` and ``.../weather/mcp`` with header
-   ``Authorization: Bearer <access_token>`` (see ``test/config.build_server_config``).
+   ``Authorization: Bearer <access_token>`` (see ``client.config.build_server_config``).
 
-Run API: ``uvicorn main:app`` from repo root. Run UI: ``streamlit run test/streamlit_app.py``.
+Run API: ``uvicorn main:app`` from repo root. Run UI: ``streamlit run app.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import sys
 from pathlib import Path
 
-import requests
 import streamlit as st
 from dotenv import load_dotenv
 
-_REPO = Path(__file__).resolve().parents[1]
+from client.agent import agent_reply_text, build_chat_agent, fetch_access_token
+from client.config import mcp_server_url
+
+_REPO = Path(__file__).resolve().parent
 load_dotenv(_REPO / ".env")
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from agent import agent_reply_text, build_chat_agent  # noqa: E402
-from config import build_server_config  # noqa: E402
-
-
-def mcp_base_url() -> str:
-    return os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000").rstrip("/")
-
-
-def fetch_access_token(username: str, password: str) -> str:
-    s = requests.Session()
-    s.trust_env = False
-    r = s.post(
-        f"{mcp_base_url()}/auth/token",
-        data={"username": username, "password": password},
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=(5, 20),
-    )
-    r.raise_for_status()
-    return str(r.json()["access_token"])
 
 
 @st.cache_resource
@@ -58,7 +38,7 @@ def main() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    st.caption(f"Server: `{mcp_base_url()}`")
+    st.caption(f"Server: `{mcp_server_url()}`")
 
     env_tok = (os.getenv("MCP_BEARER_TOKEN") or "").strip()
     if env_tok and not st.session_state.token:
