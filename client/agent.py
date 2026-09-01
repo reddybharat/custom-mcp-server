@@ -12,10 +12,12 @@ from langchain.agents import create_agent
 from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from client.config import build_server_config, mcp_server_url
+from client.config import build_server_config, build_single_server_config, mcp_server_url
 from client.mcp_context import mcp_bootstrap_system_extension, selective_mcp_context
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 SYSTEM_PROMPT = (
     "You have MCP tools for math and weather.\n"
@@ -67,6 +69,10 @@ def _api_key_from_env() -> str | None:
     return key or None
 
 
+def groq_model() -> str:
+    return (os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL).strip()
+
+
 def resolve_api_key(*, cli_api_key: str | None = None, prompt: bool = True) -> str:
     """Resolve API key: CLI flag → env → optional getpass."""
     if cli_api_key and cli_api_key.strip():
@@ -81,18 +87,28 @@ def resolve_api_key(*, cli_api_key: str | None = None, prompt: bool = True) -> s
     return getpass.getpass(f"MCP server {mcp_server_url()} — API key: ").strip()
 
 
-async def build_chat_agent(*, api_key: str | None = None) -> MCPAgentBundle:
+async def build_chat_agent(
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    mcp_url: str | None = None,
+) -> MCPAgentBundle:
     """LangChain agent over MCP; pass ``api_key`` or set ``MCP_API_KEY`` env.
 
-    MCP prompts/resources are merged into the system prompt at build time; keep
-    ``bundle.client`` for per-turn ``selective_mcp_context`` (see ``app.py``).
+  ``mcp_url`` connects to one MCP endpoint (Streamlit). ``base_url`` connects to
+    all default mounts (CLI). MCP prompts/resources are merged into the system
+    prompt at build time; keep ``bundle.client`` for per-turn ``selective_mcp_context``.
     """
     key = (api_key or "").strip() or _api_key_from_env() or ""
     if not key:
         raise ValueError(
             "Missing MCP API key: pass api_key=, set MCP_API_KEY, or use --api-key / getpass."
         )
-    client = MultiServerMCPClient(build_server_config(api_key=key))
+    if mcp_url and mcp_url.strip():
+        config = build_single_server_config(mcp_url=mcp_url.strip(), api_key=key)
+    else:
+        config = build_server_config(api_key=key, base_url=base_url)
+    client = MultiServerMCPClient(config)
     try:
         mcp_tools = await client.get_tools()
         mcp_extra = await mcp_bootstrap_system_extension(client)
@@ -104,7 +120,7 @@ async def build_chat_agent(*, api_key: str | None = None) -> MCPAgentBundle:
     system = SYSTEM_PROMPT
     if mcp_extra:
         system = f"{SYSTEM_PROMPT}\n\n---\nMCP bootstrap (prompts, resources, discovery):\n{mcp_extra}"
-    model_groq = ChatGroq(model="llama-3.3-70b-versatile")
+    model_groq = ChatGroq(model=groq_model())
     agent = create_agent(
         model=model_groq,
         tools=mcp_tools,

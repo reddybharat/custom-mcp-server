@@ -97,28 +97,31 @@ async def _mcp_listing_lines(client: MultiServerMCPClient, server: str) -> str:
 async def mcp_bootstrap_system_extension(client: MultiServerMCPClient) -> str:
     """Prompts, explicit capability resources, and optional list_* discovery for system prompt."""
     sections: list[str] = []
+    servers = list(client.connections.keys())
 
-    math_msgs = await _silent(
-        client.get_prompt(MATH_SERVER, MATH_PROMPT_NAME, arguments={"focus": "general"})
-    )
-    if isinstance(math_msgs, list) and math_msgs:
-        sections.append("### Math MCP (prompt)\n" + _prompt_messages_to_text(math_msgs))
+    if MATH_SERVER in servers:
+        math_msgs = await _silent(
+            client.get_prompt(MATH_SERVER, MATH_PROMPT_NAME, arguments={"focus": "general"})
+        )
+        if isinstance(math_msgs, list) and math_msgs:
+            sections.append("### Math MCP (prompt)\n" + _prompt_messages_to_text(math_msgs))
 
-    wx_msgs = await _silent(
-        client.get_prompt(WEATHER_SERVER, WEATHER_PROMPT_NAME, arguments={})
-    )
-    if isinstance(wx_msgs, list) and wx_msgs:
-        sections.append("### Weather MCP (prompt)\n" + _prompt_messages_to_text(wx_msgs))
+        math_blobs = await _silent(client.get_resources(MATH_SERVER, uris=MATH_RESOURCE_URI))
+        if isinstance(math_blobs, list) and math_blobs:
+            sections.append("### Math MCP (resource)\n" + _blobs_to_text(math_blobs))
 
-    math_blobs = await _silent(client.get_resources(MATH_SERVER, uris=MATH_RESOURCE_URI))
-    if isinstance(math_blobs, list) and math_blobs:
-        sections.append("### Math MCP (resource)\n" + _blobs_to_text(math_blobs))
+    if WEATHER_SERVER in servers:
+        wx_msgs = await _silent(
+            client.get_prompt(WEATHER_SERVER, WEATHER_PROMPT_NAME, arguments={})
+        )
+        if isinstance(wx_msgs, list) and wx_msgs:
+            sections.append("### Weather MCP (prompt)\n" + _prompt_messages_to_text(wx_msgs))
 
-    wx_blobs = await _silent(client.get_resources(WEATHER_SERVER, uris=WEATHER_RESOURCE_URI))
-    if isinstance(wx_blobs, list) and wx_blobs:
-        sections.append("### Weather MCP (resource)\n" + _blobs_to_text(wx_blobs))
+        wx_blobs = await _silent(client.get_resources(WEATHER_SERVER, uris=WEATHER_RESOURCE_URI))
+        if isinstance(wx_blobs, list) and wx_blobs:
+            sections.append("### Weather MCP (resource)\n" + _blobs_to_text(wx_blobs))
 
-    for server in (MATH_SERVER, WEATHER_SERVER):
+    for server in servers:
         disc = await _silent(_mcp_listing_lines(client, server))
         if isinstance(disc, str) and disc.strip():
             sections.append("### Discovery\n" + disc)
@@ -170,7 +173,8 @@ async def selective_mcp_context(
 ) -> str:
     """Turn-specific get_prompt calls (richer arguments) when the message looks math/weather-related."""
     chunks: list[str] = []
-    if _text_suggests_weather(user_text):
+    servers = client.connections.keys()
+    if WEATHER_SERVER in servers and _text_suggests_weather(user_text):
         args: dict[str, Any] = {}
         city = _guess_city(user_text)
         if city:
@@ -183,7 +187,7 @@ async def selective_mcp_context(
                 "### Weather MCP (turn-specific prompt)\n" + _prompt_messages_to_text(msgs)
             )
 
-    if _text_suggests_math(user_text):
+    if MATH_SERVER in servers and _text_suggests_math(user_text):
         focus = user_text.strip()
         if len(focus) > 200:
             focus = focus[:200] + "…"
