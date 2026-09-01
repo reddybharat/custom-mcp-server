@@ -28,3 +28,31 @@ async def get_weather(city: str) -> str:
     )
 
     return current_weather_str
+
+
+@weather_mcp.resource("resource://weather/capabilities", mime_type="text/plain")
+async def weather_capabilities() -> str:
+    """Reference text describing Weather MCP tools (for clients that load resources)."""
+    return (
+        "Weather MCP tools (require scope mcp:weather):\n"
+        "- get_weather(city: str) -> str: current conditions from WeatherAPI "
+        "(temperature °C, condition text, humidity). Requires WEATHER_API_KEY on the server.\n"
+    )
+
+
+@weather_mcp.prompt(
+    name="weather_assistant",
+    title="Weather assistant",
+    description="Bootstrap messages for weather questions; optional city for context.",
+)
+async def weather_assistant(city: str | None = None) -> str:
+    if city:
+        return (
+            "You are helping with weather information via the Weather MCP server. "
+            f"The user is interested in: {city}. "
+            "Call get_weather with the city name when they need current conditions."
+        )
+    return (
+        "You are helping with weather information via the Weather MCP server. "
+        "When the user names a city, call get_weather(city) for current conditions."
+    )

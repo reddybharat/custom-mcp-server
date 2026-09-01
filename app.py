@@ -16,7 +16,7 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from client.agent import agent_reply_text, build_chat_agent, fetch_access_token
+from client.agent import agent_reply_text, ainvoke_with_selective_mcp, build_chat_agent, fetch_access_token
 from client.config import mcp_server_url
 
 _REPO = Path(__file__).resolve().parent
@@ -65,7 +65,7 @@ def main() -> None:
         st.rerun()
 
     try:
-        agent = chat_agent(st.session_state.token)
+        bundle = chat_agent(st.session_state.token)
     except Exception as e:
         st.error(f"Could not start the agent. Is the MCP server running, JWT_SECRET set, and GROQ_API_KEY set?\n\n{e}")
         st.stop()
@@ -88,7 +88,7 @@ def main() -> None:
                             for x in st.session_state.messages
                         ]
                     }
-                    result = asyncio.run(agent.ainvoke(payload))
+                    result = asyncio.run(ainvoke_with_selective_mcp(bundle, payload["messages"]))
                     reply = agent_reply_text(result)
                 except Exception as e:
                     reply = f"Something went wrong: {e}"

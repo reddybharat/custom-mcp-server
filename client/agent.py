@@ -3,6 +3,7 @@ import asyncio
 import getpass
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -12,6 +13,7 @@ from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from client.config import build_server_config, mcp_server_url
+from client.mcp_context import mcp_bootstrap_system_extension, selective_mcp_context
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -20,6 +22,14 @@ SYSTEM_PROMPT = (
     "Use a tool when the user needs exact numbers or current weather—otherwise answer normally.\n"
     "Keep replies short. If a tool errors, say so briefly."
 )
+
+
+@dataclass(frozen=True)
+class MCPAgentBundle:
+    """LangChain agent plus the MCP client used for prompts/resources (selective context per turn)."""
+
+    agent: object
+    client: MultiServerMCPClient
 
 
 def agent_reply_text(result: dict) -> str:
@@ -90,8 +100,12 @@ def _token_from_env() -> str | None:
     return None
 
 
-async def build_chat_agent(*, access_token: str | None = None) -> object:
-    """LangChain agent over MCP; pass ``access_token`` or set MCP_BEARER_TOKEN / MCP_AUTH_* env."""
+async def build_chat_agent(*, access_token: str | None = None) -> MCPAgentBundle:
+    """LangChain agent over MCP; pass ``access_token`` or set MCP_BEARER_TOKEN / MCP_AUTH_* env.
+
+    MCP prompts/resources are merged into the system prompt at build time; keep
+    ``bundle.client`` for per-turn ``selective_mcp_context`` (see ``app.py``).
+    """
     token = (access_token or "").strip() or _token_from_env() or ""
     if not token:
         raise ValueError(
@@ -100,17 +114,43 @@ async def build_chat_agent(*, access_token: str | None = None) -> object:
         )
     client = MultiServerMCPClient(build_server_config(bearer_token=token))
     mcp_tools = await client.get_tools()
+    mcp_extra = await mcp_bootstrap_system_extension(client)
+    system = SYSTEM_PROMPT
+    if mcp_extra:
+        system = f"{SYSTEM_PROMPT}\n\n---\nMCP bootstrap (prompts, resources, discovery):\n{mcp_extra}"
     model_groq = ChatGroq(model="llama-3.3-70b-versatile")
-    return create_agent(
+    agent = create_agent(
         model=model_groq,
         tools=mcp_tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system,
     )
+    return MCPAgentBundle(agent=agent, client=client)
+
+
+async def ainvoke_with_selective_mcp(
+    bundle: MCPAgentBundle,
+    messages: list[dict[str, str]],
+) -> dict:
+    """Run the agent after optionally appending turn-specific MCP prompt text to the last user turn."""
+    if not messages:
+        return await bundle.agent.ainvoke({"messages": messages})
+    extra = await selective_mcp_context(bundle.client, str(messages[-1].get("content", "")))
+    if not extra:
+        return await bundle.agent.ainvoke({"messages": messages})
+    msgs = messages.copy()
+    last = msgs[-1]
+    if last.get("role") == "user":
+        msgs[-1] = {**last, "content": f"{last.get('content', '')}\n\n{extra}"}
+    else:
+        msgs.append({"role": "user", "content": extra})
+    return await bundle.agent.ainvoke({"messages": msgs})
 
 
 async def _run_single_query(*, access_token: str, query: str) -> str:
-    agent = await build_chat_agent(access_token=access_token)
-    result = await agent.ainvoke({"messages": [{"role": "user", "content": query}]})
+    bundle = await build_chat_agent(access_token=access_token)
+    result = await ainvoke_with_selective_mcp(
+        bundle, [{"role": "user", "content": query}]
+    )
     return agent_reply_text(result)
 
 
