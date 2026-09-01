@@ -34,6 +34,14 @@ class MCPAgentBundle:
     client: MultiServerMCPClient
 
 
+@dataclass(frozen=True)
+class AgentTurnResult:
+    """Agent invoke result plus optional per-turn MCP context metadata."""
+
+    result: dict
+    context_extra: str | None = None
+
+
 def agent_reply_text(result: dict) -> str:
     """Last assistant message text from ``create_agent`` / ``ainvoke`` result."""
     msg = result["messages"][-1]
@@ -132,28 +140,31 @@ async def build_chat_agent(
 async def ainvoke_with_selective_mcp(
     bundle: MCPAgentBundle,
     messages: list[dict[str, str]],
-) -> dict:
+) -> AgentTurnResult:
     """Run the agent after optionally appending turn-specific MCP prompt text to the last user turn."""
     if not messages:
-        return await bundle.agent.ainvoke({"messages": messages})
+        result = await bundle.agent.ainvoke({"messages": messages})
+        return AgentTurnResult(result=result)
     extra = await selective_mcp_context(bundle.client, str(messages[-1].get("content", "")))
     if not extra:
-        return await bundle.agent.ainvoke({"messages": messages})
+        result = await bundle.agent.ainvoke({"messages": messages})
+        return AgentTurnResult(result=result)
     msgs = messages.copy()
     last = msgs[-1]
     if last.get("role") == "user":
         msgs[-1] = {**last, "content": f"{last.get('content', '')}\n\n{extra}"}
     else:
         msgs.append({"role": "user", "content": extra})
-    return await bundle.agent.ainvoke({"messages": msgs})
+    result = await bundle.agent.ainvoke({"messages": msgs})
+    return AgentTurnResult(result=result, context_extra=extra)
 
 
 async def _run_single_query(*, api_key: str, query: str) -> str:
     bundle = await build_chat_agent(api_key=api_key)
-    result = await ainvoke_with_selective_mcp(
+    turn = await ainvoke_with_selective_mcp(
         bundle, [{"role": "user", "content": query}]
     )
-    return agent_reply_text(result)
+    return agent_reply_text(turn.result)
 
 
 def _parse_cli_args() -> tuple[str | None, str]:
