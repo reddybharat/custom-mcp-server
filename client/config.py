@@ -9,32 +9,65 @@ import os
 """
 MCP client URLs and auth headers.
 
-Pass the JWT from ``POST /auth/token`` into ``build_server_config(bearer_token=...)``.
+Pass the API key into ``build_server_config(api_key=...)`` or set ``MCP_API_KEY``.
 
 Set MCP_SERVER_URL (e.g. http://127.0.0.1:8000) so client URLs match the API.
-
-Alternatively set MCP_BEARER_TOKEN in the environment (used when no interactive login).
 """
+
+MCP_MOUNTS = {"Math": "/math/mcp", "Weather": "/weather/mcp"}
+DEFAULT_SERVER_NAME = "MCP"
 
 
 def mcp_server_url() -> str:
     return os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
-def build_server_config(*, bearer_token: str | None = None) -> dict:
-    """Build MultiServerMCPClient config. Use bearer_token from ``POST /auth/token``."""
+def _auth_headers(*, api_key: str | None) -> dict[str, str]:
     headers: dict[str, str] = {}
-    if bearer_token and bearer_token.strip():
-        headers["Authorization"] = f"Bearer {bearer_token.strip()}"
-    base = mcp_server_url()
+    if api_key and api_key.strip():
+        headers["X-API-Key"] = api_key.strip()
+    return headers
+
+
+def server_name_from_mcp_url(mcp_url: str) -> str:
+    """Infer a stable connection name from the MCP URL path."""
+    path = mcp_url.rstrip("/").lower()
+    if "/math" in path:
+        return "Math"
+    if "/weather" in path:
+        return "Weather"
+    return DEFAULT_SERVER_NAME
+
+
+def build_single_server_config(
+    *,
+    mcp_url: str,
+    api_key: str | None = None,
+    server_name: str | None = None,
+) -> dict:
+    """Build MultiServerMCPClient config for one MCP endpoint."""
+    name = server_name or server_name_from_mcp_url(mcp_url)
+    return {
+        name: {
+            "url": mcp_url.rstrip("/"),
+            "transport": "streamable_http",
+            "headers": _auth_headers(api_key=api_key),
+        }
+    }
+
+
+def build_server_config(*, api_key: str | None = None, base_url: str | None = None) -> dict:
+    """Build MultiServerMCPClient config for all known mounts (CLI default)."""
+    headers = _auth_headers(api_key=api_key)
+    base = (base_url or mcp_server_url()).rstrip("/")
     return {
         "Math": {
-            "url": f"{base}/math/mcp",
+            "url": f"{base}{MCP_MOUNTS['Math']}",
             "transport": "streamable_http",
             "headers": headers,
         },
         "Weather": {
-            "url": f"{base}/weather/mcp",
+            "url": f"{base}{MCP_MOUNTS['Weather']}",
             "transport": "streamable_http",
             "headers": headers,
         },

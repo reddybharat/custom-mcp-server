@@ -1,1 +1,1 @@
-"""Custom MCP server package (tools, auth, persistence)."""
+"""Custom MCP server package (tools and middleware)."""
