@@ -4,9 +4,9 @@ import requests
 
 import server.env  # noqa: F401 — ensure `.env` loaded for WEATHER_API_KEY
 
-from server.core.auth import create_authenticated_mcp
+from mcp.server.fastmcp import FastMCP
 
-weather_mcp = create_authenticated_mcp("Weather", "weather", required_scopes=["mcp:weather"])
+weather_mcp = FastMCP("Weather")
 
 
 @weather_mcp.tool()
@@ -34,7 +34,7 @@ async def get_weather(city: str) -> str:
 async def weather_capabilities() -> str:
     """Reference text describing Weather MCP tools (for clients that load resources)."""
     return (
-        "Weather MCP tools (require scope mcp:weather):\n"
+        "Weather MCP tools:\n"
         "- get_weather(city: str) -> str: current conditions from WeatherAPI "
         "(temperature °C, condition text, humidity). Requires WEATHER_API_KEY on the server.\n"
     )

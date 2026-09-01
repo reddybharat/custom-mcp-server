@@ -2,11 +2,11 @@ import argparse
 import asyncio
 import getpass
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_groq import ChatGroq
@@ -51,70 +51,56 @@ def agent_reply_text(result: dict) -> str:
     return str(c)
 
 
-def fetch_access_token(username: str, password: str) -> str:
-    base = mcp_server_url()
-    s = requests.Session()
-    s.trust_env = False
-    try:
-        r = s.post(
-            f"{base}/auth/token",
-            data={"username": username, "password": password},
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=(5, 20),
-        )
-    except requests.RequestException as e:
-        raise RuntimeError(f"Could not reach MCP server at {base}: {e}") from e
-
-    if r.status_code == 401:
-        raise ValueError(
-            "Invalid username or password. Please check your credentials and try again."
-        )
-    if not r.ok:
-        detail = ""
-        try:
-            body = r.json()
-            d = body.get("detail")
-            if isinstance(d, str):
-                detail = d
-            elif d is not None:
-                detail = str(d)
-        except Exception:
-            detail = (r.text or "")[:200]
-        raise RuntimeError(
-            f"Authentication request failed (HTTP {r.status_code}). {detail or r.reason}".strip()
-        )
-    try:
-        return str(r.json()["access_token"])
-    except (KeyError, ValueError) as e:
-        raise RuntimeError("Unexpected response from server: missing access_token.") from e
-
-
-def _token_from_env() -> str | None:
-    direct = (os.getenv("MCP_BEARER_TOKEN") or "").strip()
-    if direct:
-        return direct
-    u = (os.getenv("MCP_AUTH_USERNAME") or "").strip()
-    p = (os.getenv("MCP_AUTH_PASSWORD") or "").strip()
-    if u and p:
-        return fetch_access_token(u, p)
+def format_mcp_auth_error(exc: Exception) -> str | None:
+    """Map MCP HTTP auth failures to clear 401/503 messages."""
+    text = f"{type(exc).__name__}: {exc}"
+    lower = text.lower()
+    if re.search(r"\b503\b", text) or "not configured" in lower:
+        return "MCP server not configured (503): MCP API key not configured on server"
+    if re.search(r"\b401\b", text) or "unauthorized" in lower or "invalid or missing api key" in lower:
+        return "MCP auth failed (401): Invalid or missing API key"
     return None
 
 
-async def build_chat_agent(*, access_token: str | None = None) -> MCPAgentBundle:
-    """LangChain agent over MCP; pass ``access_token`` or set MCP_BEARER_TOKEN / MCP_AUTH_* env.
+def _api_key_from_env() -> str | None:
+    key = (os.getenv("MCP_API_KEY") or "").strip()
+    return key or None
+
+
+def resolve_api_key(*, cli_api_key: str | None = None, prompt: bool = True) -> str:
+    """Resolve API key: CLI flag → env → optional getpass."""
+    if cli_api_key and cli_api_key.strip():
+        return cli_api_key.strip()
+    env_key = _api_key_from_env()
+    if env_key:
+        return env_key
+    if not prompt:
+        raise ValueError(
+            "Missing MCP API key: pass --api-key, or set MCP_API_KEY in the environment."
+        )
+    return getpass.getpass(f"MCP server {mcp_server_url()} — API key: ").strip()
+
+
+async def build_chat_agent(*, api_key: str | None = None) -> MCPAgentBundle:
+    """LangChain agent over MCP; pass ``api_key`` or set ``MCP_API_KEY`` env.
 
     MCP prompts/resources are merged into the system prompt at build time; keep
     ``bundle.client`` for per-turn ``selective_mcp_context`` (see ``app.py``).
     """
-    token = (access_token or "").strip() or _token_from_env() or ""
-    if not token:
+    key = (api_key or "").strip() or _api_key_from_env() or ""
+    if not key:
         raise ValueError(
-            "Missing MCP token: pass access_token=, or set MCP_BEARER_TOKEN, "
-            "or MCP_AUTH_USERNAME + MCP_AUTH_PASSWORD for POST /auth/token."
+            "Missing MCP API key: pass api_key=, set MCP_API_KEY, or use --api-key / getpass."
         )
-    client = MultiServerMCPClient(build_server_config(bearer_token=token))
-    mcp_tools = await client.get_tools()
-    mcp_extra = await mcp_bootstrap_system_extension(client)
+    client = MultiServerMCPClient(build_server_config(api_key=key))
+    try:
+        mcp_tools = await client.get_tools()
+        mcp_extra = await mcp_bootstrap_system_extension(client)
+    except Exception as exc:
+        auth_msg = format_mcp_auth_error(exc)
+        if auth_msg:
+            raise RuntimeError(auth_msg) from exc
+        raise
     system = SYSTEM_PROMPT
     if mcp_extra:
         system = f"{SYSTEM_PROMPT}\n\n---\nMCP bootstrap (prompts, resources, discovery):\n{mcp_extra}"
@@ -146,17 +132,23 @@ async def ainvoke_with_selective_mcp(
     return await bundle.agent.ainvoke({"messages": msgs})
 
 
-async def _run_single_query(*, access_token: str, query: str) -> str:
-    bundle = await build_chat_agent(access_token=access_token)
+async def _run_single_query(*, api_key: str, query: str) -> str:
+    bundle = await build_chat_agent(api_key=api_key)
     result = await ainvoke_with_selective_mcp(
         bundle, [{"role": "user", "content": query}]
     )
     return agent_reply_text(result)
 
 
-def _parse_cli_query() -> str:
+def _parse_cli_args() -> tuple[str | None, str]:
     parser = argparse.ArgumentParser(
-        description="Authenticate to the MCP API, then ask the agent one question."
+        description="Connect to the MCP API with an API key, then ask the agent one question."
+    )
+    parser.add_argument(
+        "--api-key",
+        dest="api_key",
+        default=None,
+        help="MCP API key (overrides MCP_API_KEY env)",
     )
     parser.add_argument(
         "query",
@@ -167,29 +159,31 @@ def _parse_cli_query() -> str:
     q = " ".join(args.query).strip()
     if not q:
         q = input("Question: ").strip()
-    return q
+    return args.api_key, q
 
 
 # From repo root: python -m client.agent "your question"  — or no args to be prompted for the question.
 if __name__ == "__main__":
-    query = _parse_cli_query()
+    cli_api_key, query = _parse_cli_args()
     if not query:
         print("Error: empty question.", file=sys.stderr)
         sys.exit(1)
 
     try:
-        tok = _token_from_env()
-        if not tok:
-            u = input(f"MCP server {mcp_server_url()} — username: ").strip()
-            p = getpass.getpass("Password: ")
-            tok = fetch_access_token(u, p)
+        key = resolve_api_key(cli_api_key=cli_api_key, prompt=True)
+        if not key:
+            raise ValueError("Empty API key.")
     except (ValueError, RuntimeError) as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
     try:
-        reply = asyncio.run(_run_single_query(access_token=tok, query=query))
+        reply = asyncio.run(_run_single_query(api_key=key, query=query))
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"Agent error: {e}", file=sys.stderr)
+        auth_msg = format_mcp_auth_error(e)
+        print(auth_msg or f"Agent error: {e}", file=sys.stderr)
         sys.exit(1)
     print(f"Response: {reply}")

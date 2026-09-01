@@ -1,8 +1,8 @@
 from typing import List
 
-from server.core.auth import create_authenticated_mcp
+from mcp.server.fastmcp import FastMCP
 
-math_mcp = create_authenticated_mcp("Math", "math", required_scopes=["mcp:math"])
+math_mcp = FastMCP("Math")
 
 
 @math_mcp.tool()
@@ -36,7 +36,7 @@ async def divide_tool(a: float, b: float) -> float:
 async def math_capabilities() -> str:
     """Reference text describing Math MCP tools (for clients that load resources)."""
     return (
-        "Math MCP tools (all require scope mcp:math):\n"
+        "Math MCP tools:\n"
         "- add_tool(numbers: list[float]) -> float: sum of numbers\n"
         "- substract_tool(a, b) -> float: a minus b\n"
         "- multiply_tool(numbers: list[float]) -> float: product\n"
