@@ -28,7 +28,7 @@ The Model Context Protocol (MCP) is a standard for connecting AI models to exter
 
 
 
-The client runs a single LangChain agent that discovers tools from **two MCP mounts** (math and weather) on the same FastAPI app over **streamable HTTP**, protected by API-key middleware on each mount.
+The FastAPI app serves **three MCP mounts** (math, weather and search) over **streamable HTTP**, each protected by API-key middleware. The bundled client runs a single LangChain agent on the math and weather mounts; other clients (such as agentic-rag) can connect to any mount.
 
 
 
@@ -60,9 +60,13 @@ flowchart TB
 
         wx_m["/weather/mcp"]
 
+        search_m["/search/mcp"]
+
         mw --> math_m
 
         mw --> wx_m
+
+        mw --> search_m
 
     end
 
@@ -114,7 +118,10 @@ custom-mcp-server/
 
 
 
-**Math and weather** are defined under [`server/`](server/) and mounted from [`main.py`](main.py) at `/math` and `/weather` with streamable HTTP. Clients connect at `/math/mcp` and `/weather/mcp`. `APIKeyMiddleware` guards each mount prefix; requests must include `X-API-Key` matching server `MCP_API_KEY`.
+**Math, weather and search** are defined under [`server/`](server/) and mounted from [`main.py`](main.py) at `/math`, `/weather` and `/search` with streamable HTTP. Clients connect at `/math/mcp`, `/weather/mcp` and `/search/mcp`. `APIKeyMiddleware` guards each mount prefix; requests must include `X-API-Key` matching server `MCP_API_KEY`.
+
+- **Weather** (`get_weather(city)`): current conditions from WeatherAPI (`WEATHER_API_KEY`). An unknown city or a bad key comes back as a tool error with WeatherAPI's message.
+- **Search** (`web_search(query)`): up to 5 results (title, URL, snippet), ending with `(via Tavily)` or `(via DuckDuckGo)`. Uses Tavily when `TAVILY_API_KEY` is set, and DuckDuckGo when the key is missing, Tavily fails, or Tavily returns nothing.
 
 
 
@@ -174,7 +181,7 @@ Requires **Python 3.12+**.
 
 
 
-2. **Configure environment**: copy `.env.example` to `.env`. Set `MCP_API_KEY` (the example includes a dev placeholder; generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"`). Also set `GROQ_API_KEY` for the client and `WEATHER_API_KEY` on the server if you use weather tools.
+2. **Configure environment**: copy `.env.example` to `.env`. Set `MCP_API_KEY` (the example includes a dev placeholder; generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"`). Also set `GROQ_API_KEY` for the client, `WEATHER_API_KEY` on the server if you use weather tools, and optionally `TAVILY_API_KEY` for search.
 
 
 
@@ -186,7 +193,7 @@ Requires **Python 3.12+**.
 
    ```
 
-   or `uvicorn main:app --host 0.0.0.0 --port 8000`.
+   or `uvicorn main:app --host 0.0.0.0 --port 8000`. When running next to agentic-rag (whose backend uses 8000), use `uvicorn main:app --port 8001`.
 
 
 

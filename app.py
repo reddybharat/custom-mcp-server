@@ -23,6 +23,7 @@ from client.agent import (
 )
 from client.config import build_single_server_config
 from client.mcp_discovery import ServerDiscovery, discover_server
+from client.mcp_trace import extract_turn_trace
 
 _REPO = Path(__file__).resolve().parent
 load_dotenv(_REPO / ".env")
@@ -48,6 +49,8 @@ def _init_session_state() -> None:
         st.session_state.discovery = None
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "mcp_activity_idx" not in st.session_state:
+        st.session_state.mcp_activity_idx = None
 
 
 def _disconnect() -> None:
@@ -56,6 +59,7 @@ def _disconnect() -> None:
     st.session_state.messages = []
     st.session_state.api_key = None
     st.session_state.mcp_url = ""
+    st.session_state.mcp_activity_idx = None
     chat_agent.clear()
 
 
@@ -83,6 +87,65 @@ def _render_discovery(discovery: ServerDiscovery) -> None:
                 st.markdown(f"- `{prompt.name}`{desc}")
         else:
             st.caption("(none)")
+
+
+def _render_mcp_trace_body(trace: dict | None) -> None:
+    if trace is None:
+        st.caption("No MCP activity recorded for this turn.")
+        return
+
+    injected = trace.get("context_injected")
+    if injected:
+        st.markdown("**Turn-specific MCP context injected**")
+        st.text(injected)
+
+    steps = trace.get("steps") or []
+    if not steps:
+        if not injected:
+            st.caption("No tool calls this turn.")
+        return
+
+    for i, step in enumerate(steps, start=1):
+        if step.get("kind") == "tool_call":
+            st.markdown(f"**{i}. Tool call** — `{step.get('name')}`")
+            st.json(step.get("args") or {})
+        elif step.get("kind") == "tool_result":
+            label = step.get("name") or step.get("tool_call_id") or "result"
+            st.markdown(f"**{i}. Tool result** — `{label}`")
+            st.code(step.get("content") or "")
+
+
+def _render_mcp_activity_sidebar() -> None:
+    idx = st.session_state.mcp_activity_idx
+    if idx is None:
+        return
+
+    messages = st.session_state.messages
+    if idx < 0 or idx >= len(messages):
+        st.session_state.mcp_activity_idx = None
+        return
+
+    msg = messages[idx]
+    if msg.get("role") != "assistant":
+        return
+
+    with st.sidebar:
+        st.markdown("### MCP Activity")
+        if st.button("Close", key="mcp_activity_close"):
+            st.session_state.mcp_activity_idx = None
+            st.rerun()
+
+        for j in range(idx - 1, -1, -1):
+            if messages[j]["role"] == "user":
+                st.caption("Turn")
+                preview = messages[j]["content"]
+                if len(preview) > 200:
+                    preview = preview[:200] + "…"
+                st.text(preview)
+                break
+
+        st.divider()
+        _render_mcp_trace_body(msg.get("mcp_trace"))
 
 
 def _connection_tab() -> None:
@@ -166,9 +229,15 @@ def _chat_tab() -> None:
         )
         st.stop()
 
-    for m in st.session_state.messages:
+    _render_mcp_activity_sidebar()
+
+    for idx, m in enumerate(st.session_state.messages):
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
+            if m["role"] == "assistant":
+                if st.button("MCP Activity", key=f"mcp_activity_{idx}"):
+                    st.session_state.mcp_activity_idx = idx
+                    st.rerun()
 
     if prompt := st.chat_input("Ask something…"):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -176,6 +245,7 @@ def _chat_tab() -> None:
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
+            mcp_trace: dict | None = None
             with st.spinner("Thinking…"):
                 try:
                     payload = {
@@ -184,8 +254,12 @@ def _chat_tab() -> None:
                             for x in st.session_state.messages
                         ]
                     }
-                    result = asyncio.run(ainvoke_with_selective_mcp(bundle, payload["messages"]))
-                    reply = agent_reply_text(result)
+                    turn = asyncio.run(ainvoke_with_selective_mcp(bundle, payload["messages"]))
+                    reply = agent_reply_text(turn.result)
+                    mcp_trace = extract_turn_trace(
+                        turn.result["messages"],
+                        context_extra=turn.context_extra,
+                    )
                 except Exception as e:
                     if _is_auth_failure(e):
                         _disconnect()
@@ -193,9 +267,12 @@ def _chat_tab() -> None:
                         reply = f"{msg}\n\nDisconnected — please reconnect on the Connection tab."
                     else:
                         reply = f"Something went wrong: {e}"
+                    mcp_trace = {"context_injected": None, "steps": []}
             st.markdown(reply)
 
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": reply, "mcp_trace": mcp_trace}
+        )
         st.rerun()
 
 
