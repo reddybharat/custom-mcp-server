@@ -1,10 +1,13 @@
 import os
 
-import requests
+import httpx
 
 import server.env  # noqa: F401 — ensure `.env` loaded for WEATHER_API_KEY
 
 from mcp.server.fastmcp import FastMCP
+
+WEATHER_URL = "http://api.weatherapi.com/v1/current.json"
+WEATHER_TIMEOUT_S = 10
 
 weather_mcp = FastMCP("Weather")
 
@@ -18,9 +21,14 @@ async def get_weather(city: str) -> str:
         "key": os.getenv("WEATHER_API_KEY"),
         "q": city,
     }
-    response = requests.get("http://api.weatherapi.com/v1/current.json", params=params)
+    async with httpx.AsyncClient(timeout=WEATHER_TIMEOUT_S) as client:
+        response = await client.get(WEATHER_URL, params=params)
+    body = response.json()
+    # WeatherAPI reports an unknown city or a bad key as {"error": {"message": ...}}.
+    if "error" in body:
+        raise ValueError(body["error"].get("message", "Weather lookup failed"))
 
-    current_weather = response.json().get("current")
+    current_weather = body["current"]
     current_weather_str = (
         f"The current weather in {city} is {current_weather.get('condition').get('text')} "
         f"with a temperature of {current_weather.get('temp_c')}°C and a humidity of "
